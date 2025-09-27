@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       // Obtener productos de BSale
       const response = await fetch(`${bsaleUrl}/products.json?limit=50`, {
         headers: {
-          'Authorization': token,
+          'access_token': token,
           'Accept': 'application/json'
         }
       });
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       const response = await fetch(`${bsaleUrl}/products.json`, {
         method: 'POST',
         headers: {
-          'Authorization': token,
+          'access_token': token,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
