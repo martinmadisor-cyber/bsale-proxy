@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+  
   // Manejar preflight requests
   if (req.method === 'OPTIONS') {
     res.status(200).end();
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { token, code } = req.query;
+    const { token } = req.query;
     const { method } = req;
 
     if (!token) {
@@ -23,16 +23,9 @@ export default async function handler(req, res) {
     
     if (method === 'GET') {
       // Obtener clientes de BSale
-      let url = `${bsaleUrl}/clients.json?limit=50`;
-      
-      // Si se proporciona código, buscar cliente específico
-      if (code) {
-        url = `${bsaleUrl}/clients.json?code=${encodeURIComponent(code)}`;
-      }
-
-      const response = await fetch(url, {
+      const response = await fetch(`${bsaleUrl}/clients.json?limit=50`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'access_token': token,
           'Accept': 'application/json'
         }
       });
@@ -43,15 +36,13 @@ export default async function handler(req, res) {
 
       const data = await response.json();
       res.status(200).json(data);
-
     } else if (method === 'POST') {
       // Crear cliente en BSale
       const clientData = req.body;
-
       const response = await fetch(`${bsaleUrl}/clients.json`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'access_token': token,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
@@ -59,19 +50,16 @@ export default async function handler(req, res) {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`BSale API error: ${response.status} - ${errorText}`);
+        throw new Error(`BSale API error: ${response.status}`);
       }
 
       const data = await response.json();
       res.status(200).json(data);
-
     } else {
       res.status(405).json({ error: 'Método no permitido' });
     }
-
   } catch (error) {
-    console.error('Error en proxy BSale clientes:', error);
+    console.error('Error en proxy BSale:', error);
     res.status(500).json({ 
       error: 'Error en servidor proxy', 
       details: error.message 
