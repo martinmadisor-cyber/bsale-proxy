@@ -4,8 +4,7 @@
   "description": "Proxy backend para BSale API",
   "main": "index.js",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "vercel build"
+    "dev": "vercel dev"
   },
   "dependencies": {
     "cors": "^2.8.5"
