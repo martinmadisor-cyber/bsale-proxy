@@ -3,7 +3,7 @@
   "name": "bsale-proxy",
   "functions": {
     "api/*.js": {
-      "runtime": "@vercel/node@18.15.0"
+      "runtime": "nodejs18.x"
     }
   },
   "headers": [
