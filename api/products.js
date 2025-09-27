@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+  
   // Manejar preflight requests
   if (req.method === 'OPTIONS') {
     res.status(200).end();
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       // Obtener productos de BSale
       const response = await fetch(`${bsaleUrl}/products.json?limit=50`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': token,
           'Accept': 'application/json'
         }
       });
@@ -36,15 +36,13 @@ export default async function handler(req, res) {
 
       const data = await response.json();
       res.status(200).json(data);
-
     } else if (method === 'POST') {
       // Crear producto en BSale
       const productData = req.body;
-
       const response = await fetch(`${bsaleUrl}/products.json`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': token,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
@@ -57,11 +55,9 @@ export default async function handler(req, res) {
 
       const data = await response.json();
       res.status(200).json(data);
-
     } else {
       res.status(405).json({ error: 'Método no permitido' });
     }
-
   } catch (error) {
     console.error('Error en proxy BSale:', error);
     res.status(500).json({ 
