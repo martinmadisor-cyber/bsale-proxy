@@ -10,14 +10,18 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { token } = req.query;
+  const { token, id } = req.query;
 
   if (!token) {
     return res.status(400).json({ error: 'Token requerido' });
   }
 
   try {
-    let url = 'https://api.bsale.io/v1/documents.json';
+    // Si hay ID, es una request específica, sino es general
+    let url = id 
+      ? `https://api.bsale.io/v1/documents/${id}.json`
+      : 'https://api.bsale.io/v1/documents.json';
+    
     let method = req.method;
     let body = null;
 
