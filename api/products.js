@@ -1,203 +1,204 @@
-export default async function handler(req, res) {
-  // CORS headers completos
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, access_token');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+import { NextRequest, NextResponse } from 'next/server';
 
-  const { token, id } = req.query;
-  
-  if (!token) {
-    return res.status(400).json({ error: 'Token requerido' });
-  }
-
+export async function GET(request) {
   try {
-    // URL base para productos
-    let url = id 
-      ? `https://api.bsale.io/v1/products/${id}.json`
-      : 'https://api.bsale.io/v1/products.json';
-    
-    console.log('Llamando a BSale URL:', url);
-    
-    // Hacer request a BSale
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'access_token': token,
-        'Content-Type': 'application/json'
+    // Obtener parámetros de la URL
+    const { searchParams } = new URL(request.url);
+    const shop = searchParams.get('shop');
+    const accessToken = searchParams.get('access_token');
+
+    // Validar parámetros requeridos
+    if (!shop || !accessToken) {
+      return NextResponse.json(
+        { error: 'Faltan parámetros requeridos: shop y access_token' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`Obteniendo productos de la tienda: ${shop}`);
+
+    // Hacer la llamada a la API de Shopify con campos específicos
+    const response = await fetch(
+      `https://${shop}.myshopify.com/admin/api/2023-01/products.json?fields=id,title,handle,images,variants,product_type,tags&limit=50`,
+      {
+        method: 'GET',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
       }
+    );
+
+    // Verificar si la respuesta es exitosa
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error de Shopify:', response.status, errorText);
+      return NextResponse.json(
+        { error: `Error de Shopify: ${response.status} - ${errorText}` },
+        { status: response.status }
+      );
+    }
+
+    // Parsear la respuesta JSON
+    const data = await response.json();
+    console.log(`Productos obtenidos: ${data.products?.length || 0}`);
+
+    // Obtener información de inventario adicional si es necesario
+    if (data.products && data.products.length > 0) {
+      for (let product of data.products) {
+        if (product.variants && product.variants.length > 0) {
+          for (let variant of product.variants) {
+            if (variant.inventory_item_id) {
+              try {
+                const inventoryResponse = await fetch(
+                  `https://${shop}.myshopify.com/admin/api/2023-01/inventory_levels.json?inventory_item_ids=${variant.inventory_item_id}`,
+                  {
+                    headers: {
+                      'X-Shopify-Access-Token': accessToken,
+                      'Content-Type': 'application/json',
+                    },
+                  }
+                );
+                
+                if (inventoryResponse.ok) {
+                  const inventoryData = await inventoryResponse.json();
+                  if (inventoryData.inventory_levels && inventoryData.inventory_levels.length > 0) {
+                    variant.inventory_quantity = inventoryData.inventory_levels[0].available || 0;
+                  }
+                }
+              } catch (error) {
+                console.log('Error obteniendo inventario para variant:', variant.id, error);
+                variant.inventory_quantity = 0;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Transformar los datos al formato deseado
+    const transformedProducts = data.products.map(product => {
+      // Obtener el precio del primer variant (o 0 si no hay variants)
+      const mainPrice = product.variants && product.variants.length > 0 
+        ? parseFloat(product.variants[0].price) 
+        : 0;
+
+      // Obtener el stock del primer variant (o 0 si no hay variants)
+      const mainStock = product.variants && product.variants.length > 0 
+        ? (product.variants[0].inventory_quantity || 0)
+        : 0;
+
+      // Obtener la imagen principal
+      const mainImage = product.images && product.images.length > 0 
+        ? product.images[0].src 
+        : null;
+
+      return {
+        id: product.id,
+        title: product.title,
+        handle: product.handle,
+        price: mainPrice,
+        stock: mainStock,
+        image: mainImage,
+        product_type: product.product_type || '',
+        tags: product.tags || '',
+        variants: product.variants ? product.variants.map(variant => ({
+          id: variant.id,
+          title: variant.title,
+          price: parseFloat(variant.price) || 0,
+          inventory_quantity: variant.inventory_quantity || 0,
+          sku: variant.sku || '',
+          option1: variant.option1 || '',
+          option2: variant.option2 || '',
+          option3: variant.option3 || '',
+          inventory_item_id: variant.inventory_item_id,
+          weight: variant.weight || 0,
+          weight_unit: variant.weight_unit || 'kg',
+          available: variant.available !== undefined ? variant.available : true,
+          inventory_management: variant.inventory_management || null,
+          inventory_policy: variant.inventory_policy || 'deny'
+        })) : []
+      };
     });
 
-    if (!response.ok) {
-      console.error('Error de BSale:', response.status, response.statusText);
-      return res.status(response.status).json({ 
-        error: `Error de BSale: ${response.status} ${response.statusText}` 
+    // Logs para debugging
+    console.log('Productos transformados:', transformedProducts.length);
+    if (transformedProducts.length > 0) {
+      console.log('Primer producto:', {
+        id: transformedProducts[0].id,
+        title: transformedProducts[0].title,
+        price: transformedProducts[0].price,
+        stock: transformedProducts[0].stock,
+        variants_count: transformedProducts[0].variants.length
       });
+    }
+
+    // Retornar la respuesta exitosa
+    return NextResponse.json({
+      success: true,
+      products: transformedProducts,
+      total: transformedProducts.length,
+      shop: shop
+    });
+
+  } catch (error) {
+    // Manejo de errores generales
+    console.error('Error en el proxy de productos:', error);
+    return NextResponse.json(
+      { 
+        error: 'Error interno del servidor', 
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// Método POST para crear/actualizar productos (opcional)
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { shop, accessToken, productData } = body;
+
+    if (!shop || !accessToken || !productData) {
+      return NextResponse.json(
+        { error: 'Faltan parámetros requeridos' },
+        { status: 400 }
+      );
+    }
+
+    const response = await fetch(
+      `https://${shop}.myshopify.com/admin/api/2023-01/products.json`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ product: productData }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return NextResponse.json(
+        { error: `Error de Shopify: ${response.status} - ${errorText}` },
+        { status: response.status }
+      );
     }
 
     const data = await response.json();
-    console.log('Datos recibidos de BSale:', data.count || 'producto individual');
-
-    // Si tenemos productos (lista), intentar enriquecer con variantes
-    if (data.items && !id) {
-      console.log(`Procesando ${data.items.length} productos...`);
-      
-      const enrichedProducts = [];
-      
-      // Procesar solo los primeros 10 productos para evitar timeout
-      const productsToProcess = data.items.slice(0, 10);
-      
-      for (const product of productsToProcess) {
-        try {
-          const enrichedProduct = await enrichWithVariants(product, token);
-          enrichedProducts.push(enrichedProduct);
-        } catch (error) {
-          console.error(`Error procesando producto ${product.id}:`, error.message);
-          // Si falla, usar el producto original
-          enrichedProducts.push({
-            ...product,
-            price: 0,
-            totalStock: 0,
-            variants: [],
-            isAvailable: false,
-            hasMultipleVariants: false
-          });
-        }
-      }
-      
-      return res.status(200).json({
-        ...data,
-        items: enrichedProducts
-      });
-    }
-    
-    // Si es un producto individual, enriquecer con variantes
-    if (id && data.id) {
-      try {
-        const enrichedProduct = await enrichWithVariants(data, token);
-        return res.status(200).json(enrichedProduct);
-      } catch (error) {
-        console.error(`Error procesando producto individual ${id}:`, error.message);
-        return res.status(200).json({
-          ...data,
-          price: 0,
-          totalStock: 0,
-          variants: [],
-          isAvailable: false
-        });
-      }
-    }
-
-    // Devolver datos originales si no es producto
-    return res.status(200).json(data);
+    return NextResponse.json({
+      success: true,
+      product: data.product
+    });
 
   } catch (error) {
-    console.error('Error general:', error);
-    return res.status(500).json({ 
-      error: 'Error interno del servidor',
-      details: error.message 
-    });
-  }
-}
-
-async function enrichWithVariants(product, token) {
-  try {
-    console.log(`Obteniendo variantes para: ${product.name}`);
-    
-    const variantResponse = await fetch(
-      `https://api.bsale.io/v1/products/${product.id}/variants.json`, 
-      {
-        headers: { 'access_token': token },
-        timeout: 5000 // 5 segundos timeout
-      }
+    console.error('Error creando producto:', error);
+    return NextResponse.json(
+      { error: 'Error interno del servidor', details: error.message },
+      { status: 500 }
     );
-    
-    if (!variantResponse.ok) {
-      console.log(`No se pudieron obtener variantes para ${product.id}: ${variantResponse.status}`);
-      return createBasicProduct(product);
-    }
-
-    const variants = await variantResponse.json();
-    const variantItems = variants.items || [];
-
-    if (variantItems.length === 0) {
-      return createBasicProduct(product);
-    }
-
-    // Extraer precios de las variantes
-    const prices = [];
-    const stocks = [];
-    
-    variantItems.forEach(variant => {
-      // Buscar precio en diferentes campos
-      const price = variant.finalPrice || variant.price || variant.unitValue || 0;
-      if (price > 0) {
-        prices.push(price);
-      }
-      
-      // Buscar stock en diferentes campos
-      const stock = variant.quantityAvailable || variant.stock || variant.actualStock || 0;
-      stocks.push(stock);
-    });
-
-    const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
-    const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
-    const totalStock = stocks.reduce((sum, stock) => sum + stock, 0);
-    
-    console.log(`${product.name}: Precio ${minPrice}-${maxPrice}, Stock ${totalStock}`);
-
-    return {
-      ...product,
-      price: minPrice,
-      minPrice: minPrice,
-      maxPrice: maxPrice,
-      priceRange: minPrice === maxPrice ? `$${minPrice.toLocaleString()}` : `$${minPrice.toLocaleString()} - $${maxPrice.toLocaleString()}`,
-      hasPriceRange: minPrice !== maxPrice && maxPrice > 0,
-      totalStock: totalStock,
-      stockQuantity: totalStock,
-      isAvailable: totalStock > 0,
-      totalVariants: variantItems.length,
-      hasMultipleVariants: variantItems.length > 1,
-      availableVariants: variantItems.filter(v => (v.quantityAvailable || v.stock || 0) > 0).length,
-      variants: variantItems.map(v => ({
-        id: v.id,
-        code: v.code,
-        description: v.description,
-        price: v.finalPrice || v.price || v.unitValue || 0,
-        stock: v.quantityAvailable || v.stock || v.actualStock || 0,
-        isAvailable: (v.quantityAvailable || v.stock || v.actualStock || 0) > 0,
-        barCode: v.barCode,
-        attribute1Value: v.attribute1Value,
-        attribute2Value: v.attribute2Value
-      })),
-      lastUpdated: new Date().toISOString()
-    };
-
-  } catch (error) {
-    console.error(`Error enriqueciendo producto ${product.id}:`, error.message);
-    return createBasicProduct(product);
   }
-}
-
-function createBasicProduct(product) {
-  return {
-    ...product,
-    price: 0,
-    minPrice: 0,
-    maxPrice: 0,
-    priceRange: "Sin precio",
-    hasPriceRange: false,
-    totalStock: 0,
-    stockQuantity: 0,
-    isAvailable: false,
-    totalVariants: 0,
-    hasMultipleVariants: false,
-    availableVariants: 0,
-    variants: [],
-    lastUpdated: new Date().toISOString()
-  };
 }
