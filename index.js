@@ -20,8 +20,7 @@ module.exports = async (req, res) => {
       if (url === '/' || url === '/favicon.ico' || url === '/favicon.png') {
         return res.status(200).json({
           message: 'Bsale Proxy API',
-          status: 'active',
-          usage: 'Use /api/bsale/[endpoint] para acceder a la API de Bsale'
+          status: 'active'
         });
       }
     }
@@ -33,8 +32,14 @@ module.exports = async (req, res) => {
         path += '.json';
       }
       
-      const BSALE_ACCESS_TOKEN = process.env.BSALE_ACCESS_TOKEN || "2a7bf9dd3f9594699e5862c6f199d99cfabce557";
+      const BSALE_ACCESS_TOKEN = process.env.BSALE_ACCESS_TOKEN;
       
+      if (!BSALE_ACCESS_TOKEN) {
+        return res.status(500).json({
+          error: 'Token no configurado'
+        });
+      }
+
       const targetUrl = `https://api.bsale.io/v1${path}`;
 
       const headers = {
@@ -64,7 +69,7 @@ module.exports = async (req, res) => {
       if (!bsaleResponse.ok) {
         return res.status(bsaleResponse.status).json({
           success: false,
-          error: 'Error de la API de Bsale',
+          error: 'Error de Bsale',
           details: responseData,
           status: bsaleResponse.status
         });
@@ -73,16 +78,14 @@ module.exports = async (req, res) => {
       res.status(200).json({
         success: true,
         data: responseData,
-        status: bsaleResponse.status,
-        timestamp: new Date().toISOString()
+        status: bsaleResponse.status
       });
 
     } catch (error) {
       res.status(500).json({
         success: false,
-        error: 'Error interno del servidor',
-        message: error.message,
-        timestamp: new Date().toISOString()
+        error: 'Error del servidor',
+        message: error.message
       });
     }
   });
