@@ -1,90 +1,136 @@
-// Primero importamos la librería CORS que ya tienes instalada
+// Proxy para Bsale API - Versión mejorada
 const cors = require('cors');
 
-// Configuramos CORS para permitir peticiones desde ciertos dominios
 const corsOptions = {
-  // Aquí defines qué dominios pueden usar tu proxy
-  origin: ['http://localhost:3000', 'https://tu-dominio.com'], 
-  // Qué métodos HTTP permitimos (GET para obtener datos, POST para crear, etc.)
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  // Qué headers pueden enviar las peticiones
   allowedHeaders: ['Content-Type', 'Authorization', 'access_token'],
-  // Permitir cookies si es necesario
   credentials: true
 };
 
-// Esta es la función principal que maneja todas las peticiones
 module.exports = async (req, res) => {
-  // Aplicamos la configuración de CORS a esta petición
+  // Aplicar CORS
   cors(corsOptions)(req, res, async () => {
     
-    // Si es una petición OPTIONS (pregunta previa del navegador), la respondemos inmediatamente
     if (req.method === 'OPTIONS') {
       return res.status(200).end();
     }
 
-    try {
-      // Extraemos información de la petición que nos llegó
-      const { method, url } = req;
-      
-      // Limpiamos la URL para enviarla a Bsale
-      // Si llega "/api/bsale/products", enviamos "/products" a Bsale
-      const path = url.replace('/api/bsale', '');
-      
-      // Obtenemos el token de Bsale desde las variables de entorno
-      const BSALE_ACCESS_TOKEN = process.env.BSALE_ACCESS_TOKEN;
-      
-      // Si no hay token, devolvemos un error
-      if (!BSALE_ACCESS_TOKEN) {
-        return res.status(500).json({
-          error: 'Token de acceso de Bsale no configurado',
-          message: 'Configure BSALE_ACCESS_TOKEN en las variables de entorno'
+    const { method, url } = req;
+
+    // Manejar peticiones que no son de la API (favicon, raíz, etc.)
+    if (!url.startsWith('/api/bsale')) {
+      if (url === '/' || url === '/favicon.ico' || url === '/favicon.png') {
+        return res.status(200).json({
+          message: 'Bsale Proxy API',
+          status: 'active',
+          usage: 'Use /api/bsale/[endpoint] para acceder a la API de Bsale',
+          examples: [
+            '/api/bsale/products.json',
+            '/api/bsale/clients.json',
+            '/api/bsale/documents.json'
+          ]
+        });
+      } else {
+        return res.status(404).json({
+          error: 'Endpoint no encontrado',
+          message: 'Use /api/bsale/[endpoint] para acceder a la API de Bsale'
         });
       }
+    }
 
-      // Construimos la URL completa para enviar a Bsale
-      const BSALE_API_BASE = 'https://api.bsale.io/v1';
-      const targetUrl = `${BSALE_API_BASE}${path}`;
+    try {
+      // Limpiar la URL y validar
+      let path = url.replace('/api/bsale', '');
+      
+      // Si está vacío o solo es "/", mostrar ayuda
+      if (!path || path === '/') {
+        return res.status(200).json({
+          message: 'Bsale Proxy API',
+          status: 'active',
+          endpoints_disponibles: [
+            '/api/bsale/products.json - Obtener productos',
+            '/api/bsale/clients.json - Obtener clientes', 
+            '/api/bsale/documents.json - Obtener documentos',
+            '/api/bsale/stocks.json - Obtener stocks'
+          ]
+        });
+      }
+      
+      // Asegurar que empiece con /
+      if (!path.startsWith('/')) path = '/' + path;
+      
+      // Agregar .json si no lo tiene y no tiene parámetros
+      if (!path.endsWith('.json') && !path.includes('?') && !path.includes('=')) {
+        path += '.json';
+      }
+      
+      // Validar que no contenga caracteres extraños
+      if (path.includes('=') && !path.includes('?')) {
+        return res.status(400).json({
+          error: 'URL malformada',
+          message: 'La URL contiene caracteres inválidos',
+          ejemplo_correcto: '/api/bsale/products.json'
+        });
+      }
+      
+      const BSALE_ACCESS_TOKEN = process.env.BSALE_ACCESS_TOKEN || "2a7bf9dd3f9594699e5862c6f199d99cfabce557";
+      
+      console.log('✅ Procesando request válido:', method, path);
+      
+      // URL completa para Bsale
+      const targetUrl = `https://api.bsale.io/v1${path}`;
+      console.log('🌐 URL destino:', targetUrl);
 
-      // Configuramos los headers que necesita Bsale
       const headers = {
-        'Content-Type': 'application/json',
         'access_token': BSALE_ACCESS_TOKEN,
-        'User-Agent': 'Bsale-Proxy/1.0.0'
+        'Content-Type': 'application/json'
       };
 
-      // Preparamos las opciones para la petición a Bsale
       const fetchOptions = {
         method: method,
         headers: headers
       };
 
-      // Si es una petición POST o PUT, incluimos el cuerpo de la petición
       if (method === 'POST' || method === 'PUT') {
         fetchOptions.body = JSON.stringify(req.body);
       }
 
-      // Mostramos en consola qué estamos haciendo (útil para debugging)
-      console.log(`Reenviando petición ${method} a: ${targetUrl}`);
-
-      // Hacemos la petición real a Bsale
+      console.log('📡 Haciendo petición a Bsale...');
       const bsaleResponse = await fetch(targetUrl, fetchOptions);
-      const responseData = await bsaleResponse.json();
+      
+      console.log('📊 Respuesta de Bsale:', bsaleResponse.status);
 
-      // Mostramos el resultado en consola
-      console.log(`Respuesta de Bsale: ${bsaleResponse.status}`);
+      let responseData;
+      const contentType = bsaleResponse.headers.get('content-type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await bsaleResponse.json();
+      } else {
+        responseData = await bsaleResponse.text();
+      }
 
-      // Devolvemos la respuesta a quien nos consultó
-      res.status(bsaleResponse.status).json({
-        success: bsaleResponse.ok,
+      if (!bsaleResponse.ok) {
+        console.log('❌ Error de Bsale:', responseData);
+        return res.status(bsaleResponse.status).json({
+          success: false,
+          error: 'Error de la API de Bsale',
+          details: responseData,
+          status: bsaleResponse.status,
+          url_solicitada: targetUrl
+        });
+      }
+
+      console.log('✅ Respuesta exitosa de Bsale');
+      res.status(200).json({
+        success: true,
         data: responseData,
         status: bsaleResponse.status,
         timestamp: new Date().toISOString()
       });
 
     } catch (error) {
-      // Si algo sale mal, devolvemos un error detallado
-      console.error('Error en el proxy de Bsale:', error);
+      console.error('💥 Error en el proxy:', error);
       
       res.status(500).json({
         success: false,
